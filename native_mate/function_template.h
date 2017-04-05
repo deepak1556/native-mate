@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "native_mate/arguments.h"
 #include "native_mate/wrappable_base.h"
+#include "gin/public/v8_platform.h"
 #include "v8/include/v8.h"
 
 namespace mate {
@@ -19,12 +20,30 @@ enum CreateFunctionTemplateFlags {
 
 namespace internal {
 
+class WrappableDestructionTask : public v8::Task {
+ public:
+  explicit WrappableDestructionTask(WrappableBase* wrapper)
+      : wrapper_(wrapper) {}
+  ~WrappableDestructionTask() override {}
+
+  void Run() override {
+    delete wrapper_;
+  }
+
+ private:
+  WrappableBase* wrapper_;
+
+  DISALLOW_COPY_AND_ASSIGN(WrappableDestructionTask);
+};
+
 struct Destroyable {
   static void Destroy(Arguments* args) {
     v8::Local<v8::Object> holder = args->GetHolder();
-    delete static_cast<WrappableBase*>(
+    auto wrapper = static_cast<WrappableBase*>(
         holder->GetAlignedPointerFromInternalField(0));
-    holder->SetAlignedPointerInInternalField(0, nullptr);
+    wrapper->WillBeDestroyed();
+    gin::V8Platform::Get()->CallOnForegroundThread(
+        args->isolate(), new WrappableDestructionTask(wrapper));
   }
   static bool IsDestroyed(Arguments* args) {
     v8::Local<v8::Object> holder = args->GetHolder();
